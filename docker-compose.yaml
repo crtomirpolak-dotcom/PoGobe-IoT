@@ -1,0 +1,41 @@
+services:
+  # Podatkovna baza za uporabnike
+  db-users:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mushroom_users
+    ports:
+      - "5432:5432"
+
+  # Storitev za uporabnike (Port 8000)
+  user-service:
+    build: ./user-service
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db-users
+
+  # Podatkovna baza za senzorje
+  db-sensors:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+
+  # STORITEV ZA SENZORJE (Tukaj je bila napaka - manjkala je!)
+  sensor-service:
+    build: ./sensor-service
+    ports:
+      - "8001:8000" # Zunaj dostopna na 8001, znotraj na 8000
+    depends_on:
+      - db-sensors
+
+  # Cloudflare Tunnel
+  tunnel:
+    container_name: cloudflared-tunnel
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run --token "eyJhIjoiMjg5NGRmOTI1ZTA4ZjU0ZDhkOGExOTczOTQ3YTcxYzciLCJ0IjoiNmI1YjA2MGMtYjNhYy00NmI5LWFkYTQtODFkMjVhMGU5YTNhIiwicyI6Ik1qWmpOMlF6TkdRdFlqWmxOaTAwTXpSa0xXRmpNMk10WmpBNVkyRXdNRGxtTVRFMiJ9"
+    depends_on:
+      - sensor-service
