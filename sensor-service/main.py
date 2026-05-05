@@ -2,14 +2,15 @@ from fastapi import FastAPI, Request
 from motor.motor_asyncio import AsyncIOMotorClient
 import datetime
 
-# 1. NAJPREJ definiramo app
+
+
 app = FastAPI(title="Gobe IoT API")
 
-# 2. POTEM nastavimo bazo
-client = AsyncIOMotorClient("mongodb://db-sensors:27017")
+
+client = AsyncIOMotorClient("mongodb://db-sensors:27017") # definiraš bazo
 db = client.mushroom_db
 
-# 3. NA KONCU dodamo poti (endpoints)
+
 @app.get("/")
 async def root():
     return {"message": "API teče. Za podatke pojdi na /v1/sensors/latest"}
@@ -22,7 +23,7 @@ async def receive_ttn_data(request: Request):
     print(f"DEBUG PAYLOAD: {payload}")
     
     try:
-        # Pridobivanje podatkov iz TTN strukture (glede na tvoj zadnji log)
+        # Tle dobivaš senzor podatke iz TTN webhooka
         uplink = payload.get("uplink_message", {})
         decoded = uplink.get("decoded_payload", {})
         
@@ -34,7 +35,7 @@ async def receive_ttn_data(request: Request):
             print(f"Podatki so None! T={temp}, H={hum}")
             return {"status": "warning", "message": "Missing temperature or humidity"}
 
-        # Priprava dokumenta za MongoDB
+        # Formatiraš entry v MongoDB
         document = {
             "device_id": device_id,
             "temperature": float(temp),
@@ -42,7 +43,7 @@ async def receive_ttn_data(request: Request):
             "timestamp": datetime.datetime.utcnow()
         }
         
-        # Shranjevanje v bazo
+        # shraniš v bazo
         result = await db.readings.insert_one(document)
         print(f"USPEH! Shranjeno: {device_id} | T: {temp}°C, H: {hum}%")
         
