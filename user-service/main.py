@@ -3,7 +3,6 @@ from sqlmodel import Session, select
 import uuid
 from typing import List
 
-# Uvozi lokalne module
 from models import User
 from database import create_db_and_tables, get_session
 
@@ -49,10 +48,32 @@ async def get_user_devices(user_id: uuid.UUID, session: Session = Depends(get_se
     if not user:
         raise HTTPException(status_code=404, detail="Uporabnik ni najden")
     
-    # Preprečimo napako, če so device_ids NULL (vrnemo prazen seznam)
     return user.device_ids or []
 
-# Če želiš obdržati tudi staro pot /users/ za kompatibilnost:
+
 @app.get("/users/", response_model=List[User], include_in_schema=False)
 async def legacy_list_users(session: Session = Depends(get_session)):
     return session.exec(select(User)).all()
+
+
+@app.put("/devices/claim/{user_id}/{device_id}")
+async def claim_device(user_id: uuid.UUID, device_id: str, session: Session = Depends(get_session)):
+    """Poveže senzor z določenim uporabnikom."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Uporabnik ni najden")
+    
+    if user.device_ids is None:
+        user.device_ids = []
+    
+    if device_id not in user.device_ids:
+        # Ustvarimo nov seznam (SQLModel včasih ne zazna .append() na obstoječem seznamu)
+        new_devices = list(user.device_ids)
+        new_devices.append(device_id)
+        user.device_ids = new_devices
+        
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    
+    return {"message": f"Naprava {device_id} uspešno dodeljena", "current_devices": user.device_ids}

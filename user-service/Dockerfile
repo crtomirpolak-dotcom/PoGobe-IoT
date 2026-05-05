@@ -22,5 +22,3 @@ COPY . .
 # Če uporabljaš uvicorn (priporočeno za FastAPI):
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-# ALI če zagon delaš direktno s pythonom (manj verjetno):
-# CMD ["python", "main.py"]

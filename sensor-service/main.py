@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from motor.motor_asyncio import AsyncIOMotorClient
 import datetime
+import httpx 
 
 
 
@@ -61,3 +62,62 @@ async def get_latest_data():
         doc["_id"] = str(doc["_id"])
         results.append(doc)
     return results
+
+
+
+USER_SERVICE_URL = "http://user-service:8000"
+
+async def check_proactive_conditions(device_id: str, current_temp: float, current_hum: float):
+    """
+    Proaktivna logika: Preveri zadnjih 10 dni in sproži obvestilo.
+    """
+    # iz baze vzamemo podatke zadnjih 10 dni (za spreizkus raje nastavimo na manj in nastavimo IoT device da vsakih npr. 2 minute fila podatke v bazo)
+    ten_days_ago = datetime.datetime.utcnow() - datetime.timedelta(days=10)
+    cursor = db.readings.find({
+        "device_id": device_id,
+        "timestamp": {"$gte": ten_days_ago}
+    })
+    history = await cursor.to_list(length=1000)
+    
+    if not history:
+        return
+
+    # Logika je zaenkrat bolj simple samo kot proof of concept
+    # Izračunamo povprečno vlago zadnjih 10 dni
+    avg_hum = sum(d['humidity'] for d in history) / len(history)
+    
+    # Pogoj: Če je povprečna vlaga visoka IN trenutna temperatura idealna (15-20°C) ampak senzor meri direktno ob čipu -> ga greje za ene 10 stopinj zamaknjeno
+    if avg_hum > 75 and 30 <= current_temp <= 35:
+        print(f"!!! OPTIMALNI POGOJI ZA {device_id} !!!")
+        
+        # 3. Poiščemo lastnika naprave preko User Service-a
+        async with httpx.AsyncClient() as client:
+            # Ta del predvideva, da imaš v user-service endpoint za iskanje lastnika po device_id
+            # Za test lahko tukaj samo izpišeš log
+            print(f"Obveščam uporabnika o rasti gob na lokaciji {device_id}")
+
+@app.post("/v1/sensors/data")
+async def receive_ttn_data(request: Request):
+    payload = await request.json()
+    try:
+        uplink = payload.get("uplink_message", {})
+        decoded = uplink.get("decoded_payload", {})
+        temp = decoded.get("temperature")
+        hum = decoded.get("humidity")
+        device_id = payload.get("end_device_ids", {}).get("device_id", "unknown")
+
+        if temp is not None and hum is not None:
+            document = {
+                "device_id": device_id,
+                "temperature": float(temp),
+                "humidity": float(hum),
+                "timestamp": datetime.datetime.utcnow()
+            }
+            await db.readings.insert_one(document)
+            
+            #Sproži analizo brez čakanja 
+            await check_proactive_conditions(device_id, float(temp), float(hum))
+            
+            return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
