@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 
 # Uvozi svoje modele in bazo
-from models import User, UserCreate, UserLogin, Token
+from models import User, UserCreate, UserLogin, Token, Device, UserBase
 from database import create_db_and_tables, get_session
 
 app = FastAPI(
