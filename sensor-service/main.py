@@ -92,9 +92,19 @@ async def check_proactive_conditions(device_id: str, current_temp: float, curren
         
         # 3. Poiščemo lastnika naprave preko User Service-a
         async with httpx.AsyncClient() as client:
-            # Ta del predvideva, da imaš v user-service endpoint za iskanje lastnika po device_id
-            # Za test lahko tukaj samo izpišeš log
-            print(f"Obveščam uporabnika o rasti gob na lokaciji {device_id}")
+            try:
+                # Pokličemo TVOJ internal endpoint v user-service
+                response = await client.get(f"{USER_SERVICE_URL}/internal/device-owner/{device_id}")
+                
+                if response.status_code == 200:
+                    user_data = response.json()
+                    # Zdaj ko imaš user_data, lahko dejansko simuliraš obvestilo
+                    print(f">>> PROAKTIVNO OPOZORILO POSLANO: {user_data['email']} <<<")
+                    print(f"Uporabnik {user_data['username']}, gobe na lokaciji {device_id} so pripravljene!")
+                else:
+                    print(f"Naprava {device_id} nima registriranega lastnika v User Service.")
+            except Exception as e:
+                print(f"Napaka pri povezovanju z User Service: {e}")
 
 @app.post("/v1/sensors/data")
 async def receive_ttn_data(request: Request):

@@ -77,3 +77,5 @@ async def claim_device(user_id: uuid.UUID, device_id: str, session: Session = De
         session.refresh(user)
     
     return {"message": f"Naprava {device_id} uspešno dodeljena", "current_devices": user.device_ids}
+
+
