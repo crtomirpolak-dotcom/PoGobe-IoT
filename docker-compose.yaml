@@ -3,6 +3,8 @@ services:
   # --- RELACIJSKA BAZA (Uporabniki) ---
   db-users:
     image: postgres:15
+    ports:
+    - "5432:5432"
     restart: always
     environment:
       POSTGRES_USER: user_admin
@@ -49,6 +51,7 @@ services:
     depends_on:
       - sensor-service
       - user-service
+    
 
 # DEFINICIJA VOLUMNOV (Ključno, da ne pride do errorja)
 volumes:

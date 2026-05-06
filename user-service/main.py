@@ -1,9 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session, select
 import uuid
 from typing import List
+from datetime import datetime, timedelta
+from jose import jwt, JWTError
+from passlib.context import CryptContext
 
-from models import User
+from models import User, UserCreate
 from database import create_db_and_tables, get_session
 
 app = FastAPI(
@@ -12,7 +16,6 @@ app = FastAPI(
     version="1.0.1"
 )
 
-# Ustvari tabele ob zagonu
 @app.on_event("startup")
 def on_startup():
     print("Zagon aplikacije: preverjam tabele...")
@@ -34,16 +37,24 @@ async def list_users(session: Session = Depends(get_session)):
     return users
 
 @app.post("/register", response_model=User)
-async def create_user(user: User, session: Session = Depends(get_session)):
-    """Ustvari novega uporabnika. Dostopno na: users.pogobe.top/register"""
-    session.add(user)
+async def create_user(user_in: UserCreate, session: Session = Depends(get_session)):
+    # Ustvarimo objekt za bazo iz podatkov, ki so prišli po API-ju
+    # .dict() pretvori Pydantic model v slovar, 'exclude' pa odstrani password
+    user_data = user_in.model_dump(exclude={"password"})
+    
+    # Tukaj ustvarimo končni model za bazo
+    db_user = User(
+        **user_data, 
+        password_hash=user_in.password  # Zaenkrat samo prepišemo, kasneje tu dodaš hash()
+    )
+    
+    session.add(db_user)
     session.commit()
-    session.refresh(user)
-    return user
+    session.refresh(db_user)
+    return db_user
 
 @app.get("/devices/{user_id}", response_model=List[str])
 async def get_user_devices(user_id: uuid.UUID, session: Session = Depends(get_session)):
-    """Pridobi naprave specifičnega uporabnika. Dostopno na: users.pogobe.top/devices/{id}"""
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Uporabnik ni najden")
@@ -55,10 +66,9 @@ async def get_user_devices(user_id: uuid.UUID, session: Session = Depends(get_se
 async def legacy_list_users(session: Session = Depends(get_session)):
     return session.exec(select(User)).all()
 
-
+# Povezava user in IoT device
 @app.put("/devices/claim/{user_id}/{device_id}")
 async def claim_device(user_id: uuid.UUID, device_id: str, session: Session = Depends(get_session)):
-    """Poveže senzor z določenim uporabnikom."""
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Uporabnik ni najden")
@@ -67,7 +77,6 @@ async def claim_device(user_id: uuid.UUID, device_id: str, session: Session = De
         user.device_ids = []
     
     if device_id not in user.device_ids:
-        # Ustvarimo nov seznam (SQLModel včasih ne zazna .append() na obstoječem seznamu)
         new_devices = list(user.device_ids)
         new_devices.append(device_id)
         user.device_ids = new_devices
@@ -78,4 +87,54 @@ async def claim_device(user_id: uuid.UUID, device_id: str, session: Session = De
     
     return {"message": f"Naprava {device_id} uspešno dodeljena", "current_devices": user.device_ids}
 
+SECRET_KEY = "skrivna_koda_za_gobe"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+#LOGIN
+@app.post("/login", response_model=Token)
+async def login(user_in: UserCreate, session: Session = Depends(get_session)):
+    # Poiščemo uporabnika po emailu ali username-u
+    statement = select(User).where(User.email == user_in.email)
+    user = session.exec(statement).first()
+    
+    # Preverimo geslo (zaenkrat direktna primerjava, ker še nimaš hasha)
+    if not user or user.password_hash != user_in.password:
+        raise HTTPException(status_code=401, detail="Napačen email ali geslo")
+    
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+#GET podatki uporabnika
+@app.get("/me", response_model=User)
+async def get_me(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Neveljaven žeton")
+    except:
+        raise HTTPException(status_code=401, detail="Neveljaven žeton")
+        
+    user = session.exec(select(User).where(User.username == username)).first()
+    return user
+
+#Delete user
+@app.delete("/delete/{user_id}")
+async def delete_user(user_id: uuid.UUID, session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Uporabnik ni najden")
+    
+    session.delete(user)
+    session.commit()
+    return {"message": f"Uporabnik {user_id} je bil uspešno izbrisan"}
